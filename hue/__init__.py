@@ -1,5 +1,10 @@
 """
+(c) 2013 Sean McCully
+# Licensed under the MIT license: http://www.opensource.org/licenses/mit-license.php
+# Also licenced under the Apache License, 2.0: http://opensource.org/licenses/apache2.0.php
+# Licensed to PSF under a Contributor Agreement
 Base Hue
+
 """
 
 from urllib.request import Request
