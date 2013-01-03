@@ -152,7 +152,10 @@ class Hue:
 
     def _connect_hue(self, url, data=None, method=None):
         """Connect To HUE Hub"""
-        req = Request(url)
+        try:
+            req = Request(url)
+        except ValueError as exc:
+            raise HueError(exc)
         if data:
             json_str = json.dumps(data)
             json_bytes = bytearray(json_str, 'utf-8')
@@ -166,6 +169,8 @@ class Hue:
             raise InvalidHueHub(error)
         except timeout as error:
             raise InvalidHueHub(error)
+        except NameError as error:
+            raise HueError(error)
 
     def load_hue(self):
         resp = self._connect_hue(self.url)
@@ -246,6 +251,11 @@ class Hue:
                 else:
                     rand_func = uniform
                 return rand_func(allowed_range[0], allowed_range[1])
+            elif type(ALLOWED_STATES[attr]) == bool:
+                return randint(0, 1) == True
+            elif type(ALLOWED_STATES[attr]) == tuple:
+                range_x = len(ALLOWED_STATES[attr]) -1
+                return ALLOWED_STATES[attr][randint(0, range_x)]
         except KeyError as key_err:
             raise InvalidLightAttr(key_err.args)
 
@@ -327,6 +337,13 @@ class Hue:
                 raise HueError(key_err)
 
     def _compare(self, val, accepted_values):
+        if type(val) in (list, tuple):
+            ret_val = True
+            for value in val:
+                ret_val = self._compare(value, accepted_values)
+                if not ret_val:
+                    return ret_val
+            return ret_val
         if float(val) >= accepted_values[0] \
                     and float(val) <= accepted_values[1]:
             return True
