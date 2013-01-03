@@ -34,10 +34,11 @@ ALLOWED_STATES = { 'on' : bool,
 class HueLight:
     """A Hue Light"""
 
-    def __init__(self, id, light_data=None):
+    def __init__(self, id, url, light_data=None):
         """Initialize Object to represent a Hue Light"""
         self.id = id
         self.uri = '/lights/%d' % self.id
+        self.state_url = url + self.uri + '/state'
         if light_data:
             self.name = light_data['name']
             self.model_id = light_data['modelid']
@@ -70,6 +71,22 @@ class HueLight:
                 return None
         except AttributeError:
             return None
+
+    def turn_on(self):
+        """Turn Light On"""
+        req = Request(self.state_url, 
+                    data=bytearray('{ "on" : true}', 'utf-8'))
+        req.get_method = lambda: 'PUT'
+        response = request.urlopen(req)
+        return response.read()
+
+    def turn_off(self):
+        """Turn Light Off"""
+        req = Request(self.state_url, 
+                    data=bytearray('{ "on" : false}', 'utf-8'))
+        req.get_method = lambda: 'PUT'
+        response = request.urlopen(req)
+        return response.read()
 
 
 class HueConfig:
@@ -204,7 +221,7 @@ class Hue:
     def _load_lights(self, lights_dict):
         """Load Hue Lights into HueLight Objects"""
         for key in lights_dict.keys():
-            self.lights[key] = HueLight(int(key), lights_dict[key])
+            self.lights[key] = HueLight(int(key), self.url, lights_dict[key])
 
     def _load_config(self, config):
         """Load Hue Config data into HueConfig object"""
@@ -406,7 +423,9 @@ class Hue:
                 if not ret_val:
                     return ret_val
             return ret_val
-        if float(val) >= accepted_values[0] \
+        elif type(val) == accepted_values:
+            return True
+        elif float(val) >= accepted_values[0] \
                     and float(val) <= accepted_values[1]:
             return True
         else:
