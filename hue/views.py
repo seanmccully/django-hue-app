@@ -1,7 +1,7 @@
 # Create your views here.
 
 
-from hue import Hue
+from webservice.hue import Hue
 
 
 

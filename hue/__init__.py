@@ -1,7 +1,8 @@
 """
 (c) 2013 Sean McCully
 # Licensed under the MIT license: http://www.opensource.org/licenses/mit-license.php
-
+# Also licenced under the Apache License, 2.0: http://opensource.org/licenses/apache2.0.php
+# Licensed to PSF under a Contributor Agreement
 Base Hue
 
 """
@@ -9,8 +10,9 @@ Base Hue
 from urllib.request import Request
 from urllib import request
 from random import randint, uniform
-from webservices.hue.exceptions import (InvalidLightAttr, InvalidLightAttrValue, InvalidHueHub, 
-                                HueLightDoesNotExist, HueGroupDoesNotExist, HueError,
+from webservices.hue.exceptions import (InvalidLightAttr, InvalidLightAttrValue,
+                                InvalidHueHub, HueLightDoesNotExist,
+                                HueGroupDoesNotExist, HueError,
                                 HueGroupReadOnly, InvalidHueSchedule)
 from urllib.error import HTTPError, URLError
 from socket import timeout
@@ -33,6 +35,7 @@ class HueLight:
     """A Hue Light"""
 
     def __init__(self, id, light_data=None):
+        """Initialize Object to represent a Hue Light"""
         self.id = id
         self.uri = '/lights/%d' % self.id
         if light_data:
@@ -57,6 +60,7 @@ class HueLight:
  
 
     def get_state_status(self, state_attr=None):
+        """Get current light value for state attr"""
         try:
             if not state_attr:
                 return self.state
@@ -72,6 +76,7 @@ class HueConfig:
     """Current Hue Config"""
 
     def __init__(self, config_data):
+        """Load Hue Config"""
         self.dhcp = config_data['dhcp']
         self.gateway = config_data['gateway']
         self.ip_addr = config_data['ipaddress']
@@ -87,9 +92,10 @@ class HueConfig:
 
 
 class HueGroup:
-    """Represent a HUE Grouping of Lights"""
+    """Represent a Hue Grouping of Lights"""
 
     def __init__(self, key, name, lights, read_only=False):
+        """Represents a Grouping of Hue Lights"""
         self.id = key
         self.name = name
         self.lights = lights
@@ -101,6 +107,11 @@ class HueCommand:
     """ A command for use in schedules"""
 
     def __init__(self, address, body, method='PUT'):
+        """Represent a Hue Command
+            -address [uri where command is to be executed at]
+            -body [data to be sent with command]
+            -method [How HTTP request should be sent default PUT]
+        """
         self.address = address
         self.body = body
         self.method = method
@@ -111,9 +122,11 @@ class HueCommand:
                 'method' : self.method }
 
 class HueSchedule:
-    """ Represent a Schedule for HUE Hub """
+    """ Represent a Schedule for Hue Hub """
 
-    def __init__(self, key, name, description, time_stamp, command, read_only=False):
+    def __init__(self, key, name, description,
+                        time_stamp, command, read_only=False):
+        """A Hue Schedule object"""
         self.id = key
         self.name = name
         self.uri = "/schedules/%s" % self.id
@@ -121,7 +134,9 @@ class HueSchedule:
         self.date_time = datetime.strptime(time_stamp, FRMT_STR)
         if type(command) == dict:
             try:
-                self.command = HueCommand(command['address'], command['body'], command['method'])
+                self.command = HueCommand(command['address'],
+                                            command['body'],
+                                            command['method'])
             except KeyError as key_err:
                 raise InvalidHueSchedule
         elif type(command) == HueCommand:
@@ -137,6 +152,7 @@ class Hue:
     """Object Representing Hue Interface"""
 
     def __init__(self, host, app_key, port=80, load_now=True):
+        """Initialize Object for communicating with Hue Base Station"""
         self.app_key = app_key
         self.host = host
         self.port = port
@@ -150,7 +166,7 @@ class Hue:
             self.load_hue()
 
     def _connect_hue(self, url, data=None, method=None):
-        """Connect To HUE Hub"""
+        """Connect To Hue Hub"""
         try:
             req = Request(url)
         except ValueError as exc:
@@ -172,6 +188,7 @@ class Hue:
             raise HueError(error)
 
     def load_hue(self):
+        """Load default Hue Response into Hue objects"""
         resp = self._connect_hue(self.url)
         resp = self._load_json(resp.decode('utf-8'))
         self._load_lights(resp['lights'])
@@ -180,17 +197,21 @@ class Hue:
         self._load_schedules(resp['schedules'])
 
     def _load_json(self, str_data):
+        """Load json string into python data"""
         doc = json.loads(str_data)
         return doc
 
     def _load_lights(self, lights_dict):
+        """Load Hue Lights into HueLight Objects"""
         for key in lights_dict.keys():
             self.lights[key] = HueLight(int(key), lights_dict[key])
 
     def _load_config(self, config):
+        """Load Hue Config data into HueConfig object"""
         self.config = HueConfig(config)
 
     def _load_groups(self, groups):
+        """Load Hue Groups into HueGroup objects"""
         def load_lights(light_ids):
             lights = []
             try:
@@ -204,23 +225,28 @@ class Hue:
             self.groups[key] = HueGroup(key, groups[key]['name'], lights)
         if '0' not in groups:
             #There exists a 0 zero group of all lights
-            group_zero = self._connect_hue(self.url + '/groups/0').decode('utf-8')
+            group_zero = \
+            self._connect_hue(self.url + '/groups/0').decode('utf-8')
             group_zero = json.loads(group_zero)
             lights = load_lights(group_zero['lights'])
-            self.groups['0'] = HueGroup('0', group_zero['name'], lights, read_only=True)
+            self.groups['0'] = HueGroup('0', group_zero['name'],
+                                                lights, read_only=True)
 
 
     def _load_schedules(self, schedules):
+        """Load Hue Schedule into HueSchedule Objects"""
         for schedule in schedules.keys():
             try:
-                hue_schedule = HueSchedule(schedule, schedules[schedule]['name'], 
-                                    schedules[schedule]['description'], schedules[schedule]['time'],
+                hue_schedule = HueSchedule(schedule, schedules[schedule]['name'],
+                                    schedules[schedule]['description'], 
+                                    schedules[schedule]['time'],
                                     schedules[schedule]['command'])
                 self.schedules[schedule] = hue_schedule
             except KeyError as key_err:
                 raise HueError(key_err)
 
     def set_light_attr(self, light_id, attr):
+        """Set a current HueLight Object to accepted Hue attrs"""
         if light_id in self.lights:
             light_url = '%s%s/state' % (self.url, self.lights[light_id].uri)
             for key in attr.keys():
@@ -242,6 +268,7 @@ class Hue:
             return None
 
     def get_light_attr_random(self, attr):
+        """Take a Hue Light attr and get a random value in accepted range"""
         try:
             if type(ALLOWED_STATES[attr]) == list:
                 allowed_range = ALLOWED_STATES[attr]
@@ -259,6 +286,7 @@ class Hue:
             raise InvalidLightAttr(key_err.args)
 
     def delete_group(self, group_key):
+        """Delete a Hue lighting group"""
         try:
             if not self.groups[group_key].read_only:
                 group_uri = self.groups[group_key].uri
@@ -273,6 +301,7 @@ class Hue:
             raise HueGroupDoesNotExist(key_err)
 
     def delete_schedule(self, schedule_key):
+        """Delete a scheduled Hue event"""
         try:
             schedule = self.schedules[schedule_key]
             url = "%s%s" % (self.url, schedule.uri)
@@ -284,6 +313,9 @@ class Hue:
             raise HueScheduleDoesNotExist
 
     def create_group(self, lights, group_name):
+        """Create a new Hue group of lights
+            -lights [list of HueLights]
+            -group_name [Name of hue group]"""
         try:
             url = "%s/groups" % self.url
             light_keys = []
@@ -300,7 +332,30 @@ class Hue:
         except IndexError:
             raise HueError
 
-    def create_schedule(self, name, commands, description=None, time=None, repeats=None):
+    def create_schedule(self, name, commands, description=None,
+                        time=None, repeats=None):
+        """
+            Register HueSchedules with HueCommands
+            -name [Name of the Schedule]
+            -commands [List of HueCommands]
+            -description [Description optional N/A used if not provided]
+            -time [datetime object]
+            -repeats [optional dict with keys times = times to repeats,
+                        interval dict of interval parameters]
+        """
+        if repeats:
+            try:
+                if repeats['times'] > 1:
+                    repeats['times'] -= 1
+                    self.create_schedule(name, commands, description=description,
+                        time=time + timedelta(**repeats['interval']),
+                        repeats=repeats)
+                else:
+                    self.create_schedule(name, commands, description=description,
+                        time=time + timedelta(**repeats['interval']),
+                        repeats=None)
+            except KeyError:
+                raise InvalidHueSchedule
         if time == None:
            time_str = (datetime.now() + timedelta(days=1)).strftime(FRMT_STR)
         else:
@@ -312,15 +367,22 @@ class Hue:
             description = 'N/A'
         url = self.url + '/schedules'
         for command in commands:
-            data = { 'command' : command.__dict__(), 'description' : description, 'name' : name, 'time' : time_str}
+            data = { 'command' : command.__dict__(),
+                        'description' : description,
+                        'name' : name, 
+                        'time' : time_str}
             resp = self._connect_hue(url, data=data).decode('utf-8')
             resp = json.loads(resp)[0]
             if 'success' in resp:
                 schedule_id = resp['success']['id'].split('/')[-1]
-                self.schedules[schedule_id] = HueSchedule(schedule_id, name, description, time_str, command) 
+                self.schedules[schedule_id] = HueSchedule(schedule_id, name,
+                                                description, time_str, command)
 
 
     def edit_group_lights(self, lights, group_id):
+        """Add/Remove Lights from a Hue Group
+            -lights [list of lights in Hue Group]
+            -group_id [Hue group id]"""
         url = "%S/groups/%s" % (self.url, group_ip)
         light_keys = []
         for light in lights:
@@ -336,6 +398,7 @@ class Hue:
                 raise HueError(key_err)
 
     def _compare(self, val, accepted_values):
+        """Compare Value to accepted Range"""
         if type(val) in (list, tuple):
             ret_val = True
             for value in val:
