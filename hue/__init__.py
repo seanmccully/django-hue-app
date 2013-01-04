@@ -34,11 +34,12 @@ ALLOWED_STATES = { 'on' : bool,
 class HueLight:
     """A Hue Light"""
 
-    def __init__(self, id, url, light_data=None):
+    def __init__(self, id, manager, light_data=None):
         """Initialize Object to represent a Hue Light"""
         self.id = id
         self.uri = '/lights/%d' % self.id
-        self.state_url = url + self.uri + '/state'
+        self.state_url = manager.url + self.uri + '/state'
+        self.manager = manager
         if light_data:
             self.name = light_data['name']
             self.model_id = light_data['modelid']
@@ -72,12 +73,21 @@ class HueLight:
         except AttributeError:
             return None
 
+    def _set_state_status(self, state_attr, val):
+        """Update state status"""
+        try:
+            if self.manager._compare(val, ALLOWED_STATES[state_attr]):
+                self.state[state_attr] = val
+        except KeyError:
+            return None
+
     def turn_on(self):
         """Turn Light On"""
         req = Request(self.state_url, 
                     data=bytearray('{ "on" : true}', 'utf-8'))
         req.get_method = lambda: 'PUT'
         response = request.urlopen(req)
+        self.state['on'] = True
         return response.read()
 
     def turn_off(self):
@@ -86,6 +96,7 @@ class HueLight:
                     data=bytearray('{ "on" : false}', 'utf-8'))
         req.get_method = lambda: 'PUT'
         response = request.urlopen(req)
+        self.state['on'] = False
         return response.read()
 
 
@@ -221,7 +232,7 @@ class Hue:
     def _load_lights(self, lights_dict):
         """Load Hue Lights into HueLight Objects"""
         for key in lights_dict.keys():
-            self.lights[key] = HueLight(int(key), self.url, lights_dict[key])
+            self.lights[key] = HueLight(int(key), self, lights_dict[key])
 
     def _load_config(self, config):
         """Load Hue Config data into HueConfig object"""
@@ -236,6 +247,8 @@ class Hue:
                     lights.append(self.lights[light_id])
             except KeyError as key_err:
                 raise HueLightDoesNotExist(key_err)
+            else:
+                return lights
 
         for key in groups.keys():
             lights = load_lights(groups[key]['lights'])
@@ -277,6 +290,8 @@ class Hue:
                     else:
                         if not self._compare(attr[key], ALLOWED_STATES[key]):
                             raise InvalidLightAttrValue(key, attr[key])
+                        else:
+                            self.lights[light_id]._set_state_status(key, attr[key])
                 except KeyError as key_err:
                     raise InvalidLightAttr(key_err.args)
             response = self._connect_hue(light_url, data=attr, method='PUT')

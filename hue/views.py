@@ -4,7 +4,7 @@
 from django.conf import settings
 from hue import Hue
 from hue.events import randomize_all_lights
-from django.http import HttpResponse
+from django.http import HttpResponse, Http404
 from twisted.internet.task import LoopingCall
 from twisted.internet import reactor
 
@@ -31,19 +31,23 @@ def turn_off(request, light=None):
 
 
 
-def start_randomize(request, secs=1):
+def start_randomize(request, group_id=0, secs=1):
     hue = Hue(settings.HUE_HOST, settings.HUE_APP_KEY, port=settings.HUE_PORT)
-    looping_call = LoopingCall(randomize_all_lights, *(hue, ['hue', 'sat'], ))
+    looping_call = LoopingCall(randomize_all_lights, *(hue, group_id, ['hue', 'sat'], ))
     looping_call.start(secs)
     settings.TWISTED_STACK.append(looping_call)
     return HttpResponse('Looping Call Started')
 
 
 def stop_randomize(request):
-    looping_call = settings.TWISTED_STACK.pop()
-    looping_call.stop()
-    return HttpResponse('Looping Call Stopped')
+    try:
+        looping_call = settings.TWISTED_STACK.pop()
+        looping_call.stop()
+        return HttpResponse('Last Randomize Request Stopped')
+    except IndexError:
+        raise Http404
 
 
 def reactor_running(request):
     return HttpResponse(reactor.running)
+
