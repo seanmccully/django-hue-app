@@ -10,7 +10,7 @@ Base Hue
 from urllib.request import Request
 from urllib import request
 from random import randint, uniform
-from webservices.hue.exceptions import (InvalidLightAttr, InvalidLightAttrValue,
+from hue.exceptions import (InvalidLightAttr, InvalidLightAttrValue,
                                 InvalidHueHub, HueLightDoesNotExist,
                                 HueGroupDoesNotExist, HueError,
                                 HueGroupReadOnly, InvalidHueSchedule)
@@ -34,12 +34,13 @@ ALLOWED_STATES = { 'on' : bool,
 class HueLight:
     """A Hue Light"""
 
-    def __init__(self, id, manager, light_data=None):
+    def __init__(self, id, manager=None, light_data=None):
         """Initialize Object to represent a Hue Light"""
         self.id = id
         self.uri = '/lights/%d' % self.id
-        self.state_url = manager.url + self.uri + '/state'
-        self.manager = manager
+        if manager:
+            self.state_url = manager.url + self.uri + '/state'
+            self.manager = manager
         if light_data:
             self.name = light_data['name']
             self.model_id = light_data['modelid']
