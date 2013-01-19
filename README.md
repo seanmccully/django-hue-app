@@ -21,3 +21,8 @@ Schedule is created with a list of HueCommands and a datetime object.
 
 `hue.groups['1'].delete()`
 
+`commands = [HueCommand(hue.lights[key].uri + '/state', { 'hue' : 0, 'sat' : 10}, 'PUT') for key in hue.lights.keys()]`
+
+`hue.create_schedule('test', commands, time=datetime.now() + timedelta(seconds=20))`
+
+`hue.scan_lights()`
