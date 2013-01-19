@@ -33,7 +33,7 @@ def turn_off(request, light=None):
 def start_randomize(request, group_id=0, secs=1):
     hue = Hue(settings.HUE_HOST, settings.HUE_APP_KEY, port=settings.HUE_PORT)
     looping_call = LoopingCall(randomize_all_lights,
-                        *(hue, str(group_id), ['hue', 'sat'], ))
+                        *(hue.groups[group_id], ['hue', 'sat'], ))
     looping_call.start(int(secs))
     settings.TWISTED_STACK.append(looping_call)
     return HttpResponse('Looping Call Started')

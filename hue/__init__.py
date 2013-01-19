@@ -13,7 +13,8 @@ from random import randint, uniform
 from hue.exceptions import (InvalidLightAttr, InvalidLightAttrValue,
                                 InvalidHueHub, HueLightDoesNotExist,
                                 HueGroupDoesNotExist, HueError,
-                                HueGroupReadOnly, InvalidHueSchedule)
+                                InvalidHueSchedule, HueGroupInvalid, 
+                                HueLightDoesNotExist, InvalidLight, )
 from urllib.error import HTTPError, URLError
 from socket import timeout
 from datetime import datetime, timedelta
@@ -34,13 +35,12 @@ ALLOWED_STATES = { 'on' : bool,
 class HueLight:
     """A Hue Light"""
 
-    def __init__(self, id, manager=None, light_data=None):
+    def __init__(self, manager, id, light_data=None):
         """Initialize Object to represent a Hue Light"""
         self.id = str(id)
         self.uri = '/lights/%s' % self.id
-        if manager:
-            self.state_url = manager.url + self.uri + '/state'
-            self.manager = manager
+        self.state_url = manager.url + self.uri + '/state'
+        self.manager = manager
         if light_data:
             self.name = light_data['name']
             self.model_id = light_data['modelid']
@@ -77,7 +77,7 @@ class HueLight:
     def _set_state_status(self, state_attr, val):
         """Update state status"""
         try:
-            if self.manager._compare(val, ALLOWED_STATES[state_attr]):
+            if self._compare(val, ALLOWED_STATES[state_attr]):
                 self.state[state_attr] = val
         except KeyError:
             return None
@@ -99,6 +99,61 @@ class HueLight:
         response = request.urlopen(req)
         self.state['on'] = False
         return response.read()
+
+    def set_light_attr(self, attr):
+        """Set a current HueLight Object to accepted Hue attrs"""
+        for key in attr.keys():
+            try:
+                if type(ALLOWED_STATES[key]) == bool:
+                    if attr[key] not in (True, False):
+                        raise InvalidLightAttrValue(key, attr[key])
+                elif type(ALLOWED_STATES[key]) == tuple:
+                    if attr[key] not in ALLOWED_STATES[key]:
+                        raise InvalidLightAttrValue(key, attr[key])
+                else:
+                    if not self._compare(attr[key], ALLOWED_STATES[key]):
+                        raise InvalidLightAttrValue(key, attr[key])
+                    else:
+                        self._set_state_status(key, attr[key])
+            except KeyError as key_err:
+                raise InvalidLightAttr(key_err.args)
+        response = self.manager._connect_hue(self.state_url, data=attr, method='PUT')
+        return response
+
+    def get_light_attr_random(self, attr):
+        """Take a Hue Light attr and get a random value in accepted range"""
+        try:
+            if type(ALLOWED_STATES[attr]) == list:
+                allowed_range = ALLOWED_STATES[attr]
+                if type(allowed_range[1]) == int:
+                    rand_func = randint
+                else:
+                    rand_func = uniform
+                return rand_func(allowed_range[0], allowed_range[1])
+            elif type(ALLOWED_STATES[attr]) == bool:
+                return randint(0, 1) == True
+            elif type(ALLOWED_STATES[attr]) == tuple:
+                range_x = len(ALLOWED_STATES[attr]) -1
+                return ALLOWED_STATES[attr][randint(0, range_x)]
+        except KeyError as key_err:
+            raise InvalidLightAttr(key_err.args)
+
+    def _compare(self, val, accepted_values):
+        """Compare Value to accepted Range"""
+        if type(val) in (list, tuple):
+            ret_val = True
+            for value in val:
+                ret_val = self._compare(value, accepted_values)
+                if not ret_val:
+                    return ret_val
+            return ret_val
+        elif type(val) == accepted_values:
+            return True
+        elif float(val) >= accepted_values[0] \
+                    and float(val) <= accepted_values[1]:
+            return True
+        else:
+            return False
 
 
 class HueConfig:
@@ -123,13 +178,75 @@ class HueConfig:
 class HueGroup:
     """Represent a Hue Grouping of Lights"""
 
-    def __init__(self, key, name, lights, read_only=False):
+    def __init__(self, manager, name, lights, key=None):
         """Represents a Grouping of Hue Lights"""
-        self.id = key
+        self.manager = manager
         self.name = name
         self.lights = lights
-        self.uri = "/groups/%s" % self.id
-        self.read_only = read_only
+        if not key:
+            self._create_group()
+        else:
+            self.id = key
+            self.uri = "/groups/%s" % self.id
+            self.state_url = manager.url + self.uri + '/state'
+
+
+    def update(self, manager=None):
+        """Add/Remove Lights from a Hue Group
+            -lights [list of lights in Hue Group]
+            -group_id [Hue group id]"""
+        try:
+            lights = []
+            for light in self.lights:
+                if isinstance(light, HueLight):
+                    lights.append(light.id)
+                else:
+                    lights.append(light)
+            data = { 'lights' : lights, 'name' : self.name }
+        except TypeError:
+            raise HueGroupInvalid
+
+        resp = self.manager._connect_hue(self.manager.url + self.uri,
+                                        data=data, method='PUT')
+        resp = resp.decode('utf-8')
+        resp = json.loads(resp)[0]
+        if not 'success' in resp:
+            raise HueError(key_err)
+
+    def _create_group(self):
+        """Create a new Hue group of lights
+            -lights [list of HueLights]
+            -group_name [Name of hue group]"""
+        try:
+            url = "%s/groups" % self.manager.url
+            data = { "lights" : [light.id for light in self.lights],
+                     "name" : self.name }
+            resp = self.manager._connect_hue(url, data=data)
+            resp = resp.decode('utf-8')
+            data_resp = json.loads(resp)
+            if 'success' in data_resp[0]:
+                group_id = data_resp[0]['success']['id']
+                group_id = group_id.split('/')[-1]
+                self.manager.groups[group_id] = self
+                self.uri = "/groups/%s" % self.id
+                self.state_url = manager.url + self.uri + '/state'
+        except IndexError:
+            raise HueError
+        except AttributeError:
+            raise HueGroupInvalid
+
+    def delete(self):
+        """Delete a Hue lighting group"""
+        try:
+            resp = self.manager._connect_hue(self.state_url,
+                                  method='DELETE').decode('utf-8')
+            resp = json.loads(resp)
+            if 'success' in resp:
+                del self.manager.groups[self.id]
+            else:
+                raise HueGroupDoesNotExist(resp)
+        except AttributeError:
+            raise HueGroupInvalid
 
 
 class HueCommand:
@@ -153,14 +270,19 @@ class HueCommand:
 class HueSchedule:
     """ Represent a Schedule for Hue Hub """
 
-    def __init__(self, key, name, description,
-                        time_stamp, command, read_only=False):
+    def __init__(self, manager, name, description,
+                        time_stamp, command, read_only=False, key=None):
         """A Hue Schedule object"""
-        self.id = key
+        self.manager = manager
         self.name = name
-        self.uri = "/schedules/%s" % self.id
+
         self.description = description
         self.date_time = datetime.strptime(time_stamp, FRMT_STR)
+        if key:
+            self.id = key
+            self.uri = "/schedules/%s" % self.id
+            self.state_url = "%s/schedules/%s" % (self.manager.url, self.id)
+
         if type(command) == dict:
             try:
                 self.command = HueCommand(command['address'],
@@ -168,14 +290,35 @@ class HueSchedule:
                                             command['method'])
             except KeyError as key_err:
                 raise InvalidHueSchedule
-        elif type(command) == HueCommand:
+        elif isinstance(command, HueCommand):
             self.command = command
         else:
             raise InvalidHueSchedule
+        if not key:
+            self._create()
 
     def get_iso_time(self):
         return self.date_time.isoformat()
 
+    def delete(self):
+        """Delete a scheduled Hue event"""
+        resp = self._connect_hue(self.state_url, method='DELETE').decode('utf-8')
+        resp = json.loads(resp)[0]
+        if 'success' in resp:
+            del self.schedules[schedule_key]
+        else:
+            raise HueScheduleDoesNotExist
+
+    def _create(self):
+        url = self.manager.url + '/schedules'
+        resp = self._connect_hue(url, data=self.command.__dict__).decode('utf-8')
+        resp = json.loads(resp)[0]
+        if 'success' in resp:
+            schedule_id = resp['success']['id'].split('/')[-1]
+            self.manager.schedules[schedule_id] = self
+            self.id = key
+            self.uri = "/schedules/%s" % self.id
+            self.state_url = "%s/schedules/%s" % (self.manager.url, self.id)
 
 class Hue:
     """Object Representing Hue Interface"""
@@ -233,7 +376,7 @@ class Hue:
     def _load_lights(self, lights_dict):
         """Load Hue Lights into HueLight Objects"""
         for key in lights_dict.keys():
-            self.lights[key] = HueLight(int(key), self, lights_dict[key])
+            self.lights[key] = HueLight(self, int(key), lights_dict[key])
 
     def _load_config(self, config):
         """Load Hue Config data into HueConfig object"""
@@ -253,117 +396,31 @@ class Hue:
 
         for key in groups.keys():
             lights = load_lights(groups[key]['lights'])
-            self.groups[key] = HueGroup(key, groups[key]['name'], lights)
+            self.groups[key] = HueGroup(self, groups[key]['name'], lights, key=key)
         if '0' not in groups:
             #There exists a 0 zero group of all lights
             group_zero = \
             self._connect_hue(self.url + '/groups/0').decode('utf-8')
             group_zero = json.loads(group_zero)
             lights = load_lights(group_zero['lights'])
-            self.groups['0'] = HueGroup('0', group_zero['name'],
-                                                lights, read_only=True)
+            self.groups['0'] = HueGroup(self, group_zero['name'],
+                                                lights, key='0')
 
+    def create_group(self, lights, group_name):
+        return HueGroup(self, group_name, lights)
 
     def _load_schedules(self, schedules):
         """Load Hue Schedule into HueSchedule Objects"""
         for schedule in schedules.keys():
             try:
-                hue_schedule = HueSchedule(schedule, schedules[schedule]['name'],
+                hue_schedule = HueSchedule(self, schedules[schedule]['name'],
                                     schedules[schedule]['description'], 
                                     schedules[schedule]['time'],
-                                    schedules[schedule]['command'])
+                                    schedules[schedule]['command'], key=schedule)
                 self.schedules[schedule] = hue_schedule
             except KeyError as key_err:
                 raise HueError(key_err)
 
-    def set_light_attr(self, light_id, attr):
-        """Set a current HueLight Object to accepted Hue attrs"""
-        if light_id in self.lights:
-            light_url = '%s%s/state' % (self.url, self.lights[light_id].uri)
-            for key in attr.keys():
-                try:
-                    if type(ALLOWED_STATES[key]) == bool:
-                        if attr[key] not in (True, False):
-                            raise InvalidLightAttrValue(key, attr[key])
-                    elif type(ALLOWED_STATES[key]) == tuple:
-                        if attr[key] not in ALLOWED_STATES[key]:
-                            raise InvalidLightAttrValue(key, attr[key])
-                    else:
-                        if not self._compare(attr[key], ALLOWED_STATES[key]):
-                            raise InvalidLightAttrValue(key, attr[key])
-                        else:
-                            self.lights[light_id]._set_state_status(key, attr[key])
-                except KeyError as key_err:
-                    raise InvalidLightAttr(key_err.args)
-            response = self._connect_hue(light_url, data=attr, method='PUT')
-            return response
-        else:
-            return None
-
-    def get_light_attr_random(self, attr):
-        """Take a Hue Light attr and get a random value in accepted range"""
-        try:
-            if type(ALLOWED_STATES[attr]) == list:
-                allowed_range = ALLOWED_STATES[attr]
-                if type(allowed_range[1]) == int:
-                    rand_func = randint
-                else:
-                    rand_func = uniform
-                return rand_func(allowed_range[0], allowed_range[1])
-            elif type(ALLOWED_STATES[attr]) == bool:
-                return randint(0, 1) == True
-            elif type(ALLOWED_STATES[attr]) == tuple:
-                range_x = len(ALLOWED_STATES[attr]) -1
-                return ALLOWED_STATES[attr][randint(0, range_x)]
-        except KeyError as key_err:
-            raise InvalidLightAttr(key_err.args)
-
-    def delete_group(self, group_key):
-        """Delete a Hue lighting group"""
-        try:
-            if not self.groups[group_key].read_only:
-                group_uri = self.groups[group_key].uri
-                url = "%s%s" % (self.url, group_uri)
-                resp = self._connect_hue(url, method='DELETE').decode('utf-8')
-                resp = json.loads(resp)
-                if 'success' in resp:
-                    del self.groups[group_key]
-            else:
-                raise HueGroupReadOnly
-        except KeyError as key_err:
-            raise HueGroupDoesNotExist(key_err)
-
-    def delete_schedule(self, schedule_key):
-        """Delete a scheduled Hue event"""
-        try:
-            schedule = self.schedules[schedule_key]
-            url = "%s%s" % (self.url, schedule.uri)
-            resp = self._connect_hue(url, method='DELETE').decode('utf-8')
-            resp = json.loads(resp)[0]
-            if 'success' in resp:
-                del self.schedules[schedule_key]
-        except KeyError:
-            raise HueScheduleDoesNotExist
-
-    def create_group(self, lights, group_name):
-        """Create a new Hue group of lights
-            -lights [list of HueLights]
-            -group_name [Name of hue group]"""
-        try:
-            url = "%s/groups" % self.url
-            light_keys = []
-            for light in lights:
-                light_keys.append(str(light.id))
-            data = { "lights" : light_keys, "name" : group_name }
-            resp = self._connect_hue(url, data=data)
-            resp = resp.decode('utf-8')
-            data_resp = json.loads(resp)
-            if 'success' in data_resp[0]:
-                group_id = data_resp[0]['success']['id']
-                group_id = group_id.split('/')[-1]
-                self.groups[group_id] = HueGroup(group_id, group_name, lights)
-        except IndexError:
-            raise HueError
 
     def create_schedule(self, name, commands, description=None,
                         time=None, repeats=None):
@@ -398,53 +455,16 @@ class Hue:
                 raise InvalidHueSchedule
         if not description:
             description = 'N/A'
-        url = self.url + '/schedules'
         for command in commands:
-            data = { 'command' : command.__dict__(),
-                        'description' : description,
-                        'name' : name, 
-                        'time' : time_str}
-            resp = self._connect_hue(url, data=data).decode('utf-8')
-            resp = json.loads(resp)[0]
-            if 'success' in resp:
-                schedule_id = resp['success']['id'].split('/')[-1]
-                self.schedules[schedule_id] = HueSchedule(schedule_id, name,
-                                                description, time_str, command)
+            HueSchedule(self, name, description, time_str, command)
 
-
-    def edit_group_lights(self, lights, group_id):
-        """Add/Remove Lights from a Hue Group
-            -lights [list of lights in Hue Group]
-            -group_id [Hue group id]"""
-        url = "%s/groups/%s" % (self.url, group_id)
-        light_keys = []
-        for light in lights:
-            light_keys.append(str(light.id))
-        data = { "lights" : light_keys }
-        resp = self._connect_hue(url, data=data, method='PUT')
-        resp = resp.decode('utf-8')
-        resp = json.loads(resp)[0]
-        if 'success' in resp:
-            try:
-                for light_id in lights:
-                    self.groups[group_id].lights = lights
-            except KeyError as key_err:
-                raise HueError(key_err)
-
-    def _compare(self, val, accepted_values):
-        """Compare Value to accepted Range"""
-        if type(val) in (list, tuple):
-            ret_val = True
-            for value in val:
-                ret_val = self._compare(value, accepted_values)
-                if not ret_val:
-                    return ret_val
-            return ret_val
-        elif type(val) == accepted_values:
-            return True
-        elif float(val) >= accepted_values[0] \
-                    and float(val) <= accepted_values[1]:
-            return True
-        else:
-            return False
-
+    def scan_lights(self):
+        light_url = self.url + '/lights'
+        self._connect_hue(light_url, method='POST')
+        resp = self._connect_hue(light_url).decode('utf-8')
+        data = json.loads(resp)
+        for light_key in data.keys():
+            if light_key not in self.lights:
+                light_data = self._connect_hue(light_url +
+                                        '/%s' % light_key).decode('utf-8')
+                self.lights[light_key] = HueLight(self, int(light_key), json.loads(light_data))
