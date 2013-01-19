@@ -311,6 +311,10 @@ class HueSchedule:
 
     def _create(self):
         url = self.manager.url + '/schedules'
+        data = { 'command' : self.command.__dict__(),
+                        'description' : self.description,
+                        'name' : self.name, 
+                        'time' : self.get_iso_time()}
         resp = self._connect_hue(url, data=self.command.__dict__).decode('utf-8')
         resp = json.loads(resp)[0]
         if 'success' in resp:
@@ -319,6 +323,8 @@ class HueSchedule:
             self.id = key
             self.uri = "/schedules/%s" % self.id
             self.state_url = "%s/schedules/%s" % (self.manager.url, self.id)
+        else:
+            raise InvalidHueSchedule(resp)
 
 class Hue:
     """Object Representing Hue Interface"""
