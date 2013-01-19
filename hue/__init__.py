@@ -36,8 +36,8 @@ class HueLight:
 
     def __init__(self, id, manager=None, light_data=None):
         """Initialize Object to represent a Hue Light"""
-        self.id = id
-        self.uri = '/lights/%d' % self.id
+        self.id = str(id)
+        self.uri = '/lights/%s' % self.id
         if manager:
             self.state_url = manager.url + self.uri + '/state'
             self.manager = manager
@@ -416,17 +416,18 @@ class Hue:
         """Add/Remove Lights from a Hue Group
             -lights [list of lights in Hue Group]
             -group_id [Hue group id]"""
-        url = "%S/groups/%s" % (self.url, group_ip)
+        url = "%s/groups/%s" % (self.url, group_id)
         light_keys = []
         for light in lights:
             light_keys.append(str(light.id))
         data = { "lights" : light_keys }
-        resp = self._connect_hue(url, data=light_keys, method='PUT')
+        resp = self._connect_hue(url, data=data, method='PUT')
         resp = resp.decode('utf-8')
-        resp = json.loads(resp)
+        resp = json.loads(resp)[0]
         if 'success' in resp:
             try:
-                self.groups[group_id].lights = lights
+                for light_id in lights:
+                    self.groups[group_id].lights = lights
             except KeyError as key_err:
                 raise HueError(key_err)
 
