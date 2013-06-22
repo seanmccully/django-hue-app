@@ -34,3 +34,9 @@ class HueError(Exception):
 
 class HueGroupReadOnly(Exception):
     pass
+
+class HueGroupInvalid(Exception):
+   pass
+
+class InvalidLight(Exception):
+   pass
