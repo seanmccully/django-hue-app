@@ -277,7 +277,13 @@ class HueSchedule:
         self.name = name
 
         self.description = description
-        self.date_time = datetime.strptime(time_stamp, FRMT_STR)
+        
+        try:
+            self.date_time = datetime.strptime(time_stamp, FRMT_STR)
+        except ValueError:
+            # ISO 8601:2004 #Unknown Implementation of time format/duration
+            self.date_time = time_stamp
+
         if key:
             self.id = key
             self.uri = "/schedules/%s" % self.id
@@ -299,6 +305,9 @@ class HueSchedule:
 
     def get_iso_time(self):
         return self.date_time.isoformat()
+
+    def _convert_date(self, time_stamp, format):
+        datetime.strptime(time_stamp, FRMT_STR)
 
     def delete(self):
         """Delete a scheduled Hue event"""
